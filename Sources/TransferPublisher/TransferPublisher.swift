@@ -1,46 +1,77 @@
 import Foundation
 import Combine
 
-public class TransferSession: URLSession {
-    
-  public override init() {
-    let delegate = TransferSessionDelegate()
-    let queue = DispatchQueue(label: "TransferSessionDelegate", qos: .default, attributes: .concurrent)
-    super.init(configuration: .default, delegate: delegate, delegateQueue: queue)
-    self.delegate = TransferSessionDelegate()
-  }
+fileprivate class CancellableStore {
+  static let shared = CancellableStore()
+  var cancellables = Set<AnyCancellable>()
+}
+
+public enum DownloadOutput {
+   case complete(Data)
+   case downloading(transferred: Int64 = 0, expected: Int64 = 0) // cumulative bytes transferred, total bytes expected
+ }
   
-  public protocol TransferOutput {
-    var bytesTransferred: Int { get }
-    var bytesExpected: Int { get }
-  }
+extension URLSession {
   
-  public struct DownloadOutput: TransferOutput {
-    let data: Data? = nil
-    let bytesTransferred: Int = 0
-    let bytesExpected: Int = 0
-  }
-  
-  fileprivate var tasks: [Int: AnyPublisher] = [:]
-  
-  public func downloadTask(with request: URLRequest) -> AnyPublisher<DownloadOutput, Error> {
+  public func downloadTaskPublisher(with request: URLRequest) -> AnyPublisher<DownloadOutput, Error> {
   
     let subject = PassthroughSubject<DownloadOutput, Error>()
-    let task = downloadTask(with: request)
-    task.taskDescription = request.url?.absoluteString
-    self.tasks[task.taskIdentifier] = subject
-    return subject
+   
+    let task = downloadTask(with: request) { (tempURL, response, error) in
+      
+      guard error == nil else {
+        subject.send(completion: .failure(error!))
+        return
+      }
+      
+      guard let httpResponse = response as? HTTPURLResponse else {
+        let error = TransferError.urlError(URLError(.badServerResponse))
+        subject.send(completion: .failure(error))
+        return
+      }
+      
+      // handle 304 in an outer layer
+      guard httpResponse.statusCode == 200 else {
+        let error = TransferError.httpError(httpResponse)
+        subject.send(completion: .failure(error))
+        return
+      }
+      
+      guard let url = tempURL else {
+        let error = TransferError.urlError(URLError(.fileDoesNotExist))
+        // not the most appropriate error message, but at a low-level that's exactly the error
+        subject.send(completion: .failure(error))
+        return
+      }
+      
+      do {
+        let data = try Data(contentsOf: url, options: [.dataReadingMapped, .uncached])
+        subject.send(.complete(data))
+        subject.send(completion: .finished)
+      } catch {
+        subject.send(completion: .failure(error))
+        return
+      }
+
+    }
     
-  }
-  
-  
-  public func downloadTask2(with request: URLRequest) -> AnyPublisher<DownloadOutput, Error> {
-  
-    let subject = PassthroughSubject<DownloadOutput, Error>()
-    let task = downloadTask(with: request)
     task.taskDescription = request.url?.absoluteString
-    self.tasks[task.taskIdentifier] = subject
-    return subject
+    
+    let receivedPublisher = task.publisher(for: \.countOfBytesReceived)
+      .debounce(for: .seconds(0.3), scheduler: RunLoop.current) // adjust
+     
+    let expectedPublisher = task.publisher(for: \.countOfBytesExpectedToReceive, options: [.initial, .new])
+    
+    Publishers.CombineLatest(receivedPublisher, expectedPublisher)
+      .sink {
+        let (received, expected) = $0
+        let output = DownloadOutput.downloading(transferred: received, expected: expected)
+        subject.send(output)
+    }.store(in: &CancellableStore.shared.cancellables)
+    
+    task.resume()
+    
+    return subject.eraseToAnyPublisher()
     
   }
   
@@ -49,69 +80,6 @@ public class TransferSession: URLSession {
 // MARK: Error Types
 
 public enum TransferError: Error {
-  case httpError(URLHttpResponse)
+  case httpError(HTTPURLResponse)
   case urlError(URLError)
 }
-
-// MARK: Delegate
-
-private class TransferSessionDelegate: URLSessionDelegate, URLSessionDownloadDelegate, URLSessionDataTask {
-  
-  // progress
-  func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-    
-    guard let session = session as? TransferSession else { return }
-    
-    guard let publisher = session.tasks[downloadTask.taskIdentifier] else {
-      print("No reference to download task \(downloadTask.taskIdentifier)")
-      return
-    }
-    
-  }
-  
-  // success
-  func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-//    guard let url = tempURL else {
-//             let error = TransferError.urlError(URLError(.fileDoesNotExist))
-//             // not the most appropriate error message, but at a low-level that's exactly the error
-//             subject.send(completion: .finished(error))
-//             return
-//           }
-//
-//           do {
-//             let data = try Data(contentsOf: url, options: [.dataReadingMapped, .uncached])
-//             subject.send()
-//             subject.send(completion: .finished)
-//           } catch {
-//             subject.send(completion: .finished(error))
-//             return
-//           }
-//
-//
-//         }
-//
-//       }
-//
-//    }
-  }
-  
-  // error
-   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-    //    Unlike URLSessionDataTask or URLSessionUploadTask, a download task reports server-side errors reported through HTTP status codes into corresponding NSError objects. << Apple Docs
-    
-  }
-  
-  // other
-
-  func urlSession(_ session: URLSession, task: URLSessionTask, willBeginDelayedRequest request: URLRequest, completionHandler: @escaping (URLSession.DelayedRequestDisposition, URLRequest?) -> Void) {
-    
-  }
-  
-  func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
-
-    
-  }
-
-  
-}
-
