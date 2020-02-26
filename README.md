@@ -1,5 +1,4 @@
 # TransferPublisher
 
-A description of this package.
+A simple extension for URLSession to create a download URLSessionTask publisher, the same as you can data task.
 
-A simple wrapper for creating download/upload URLSessiontask publishers, the same as you can data task.
