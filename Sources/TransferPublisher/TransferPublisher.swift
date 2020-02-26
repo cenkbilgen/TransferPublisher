@@ -58,7 +58,7 @@ extension URLSession {
     task.taskDescription = request.url?.absoluteString
     
     let receivedPublisher = task.publisher(for: \.countOfBytesReceived)
-      .debounce(for: .seconds(0.3), scheduler: RunLoop.current) // adjust
+      .debounce(for: .seconds(0.1), scheduler: RunLoop.current) // adjust
      
     let expectedPublisher = task.publisher(for: \.countOfBytesExpectedToReceive, options: [.initial, .new])
     
