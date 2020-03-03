@@ -26,7 +26,7 @@ final class TransferPublisherTests: XCTestCase {
         if case .complete(let data) = output {
           print("Received file: \(data.count)")
           let image = UIImage(data: data)
-          print(image)
+          print(image.debugDescription)
           XCTAssert(data.isEmpty == false)
           XCTAssert(image != nil)
         }
