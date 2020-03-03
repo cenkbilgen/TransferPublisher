@@ -1,10 +1,15 @@
 # TransferPublisher
 
-A simple extension for URLSession to create a Combine Publisher for a URLDownloadTask, the same as you can already do with a data task.
 
-The publisher will continously publish Output as an enum either of: 
-* `downloading` (with tuple bytes received and bytes expected); or 
-* `completed` (with the data as an associated value)
+XCode 11 lets you use the new Combine framework with URLSession by directly creating a URLSessionTask publisher, but not for an download or upload task (which perform better for transferring lots of data, plus background capability)
+
+Here are two extensions to `URLSession`:
+1. `func downloadTaskPublisher(with request: URLRequest) -> AnyPublisher<DownloadOutput, Error>`
+2. `func uploadTaskPublisher(with request: URLRequest, data: Data?) -> AnyPublisher<UploadOutput, Error>`
+
+The publisher will publish periodically (every 0.1 sec) until finished Output as an enum either of: 
+* `downloading`/`uploading` with tuple (bytes received/sent, total bytes expected to send/receive); or 
+* `completed` with the downloaded data or upload response body data
 
 The publisher Failure is an `Error`.
 
