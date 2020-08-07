@@ -3,14 +3,86 @@ import Combine
 
 // MARK: Download Publisher
 
-public enum DownloadOutput {
-  case complete(Data)
-  case downloading(transferred: Int64 = 0, expected: Int64 = 0) // cumulative bytes transferred, total bytes expected
+public struct TaskOutput {
+  let taskId: Int
+  let taskDescription: String
+  let taskState: URLSessionTask.State
+  enum TransferState {
+    case complete(Data)
+    case transferring(Progress)
+  }
+  let transferState: TransferState
 }
 
+public enum DownloadOutput {
+  case complete(Data)
+  case downloading(transferred: Int64 = 0, expected: Int64 = 0) // cumulative bytes transferred, total bytes expec@available(OSX 10.13, *)
+}
+
+@available(OSX 10.15, *)
 extension URLSession {
   
-  public func downloadTaskPublisher(with request: URLRequest) -> AnyPublisher<DownloadOutput, Error> {
+  public func downloadTaskPublisher(with request: URLRequest) -> AnyPublisher<TaskOutput, Error> {
+  
+    let subject = PassthroughSubject<TaskOutput, Error>()
+   
+    let task = downloadTask(with: request) { (tempURL, response, error) in
+      
+      guard error == nil else {
+        subject.send(completion: .failure(error!))
+        return
+      }
+      
+      guard let httpResponse = response as? HTTPURLResponse else {
+        let error = TransferError.urlError(URLError(.badServerResponse))
+        subject.send(completion: .failure(error))
+        return
+      }
+      
+      // handle 304 in an outer layer
+      guard httpResponse.statusCode == 200 else {
+        let error = TransferError.httpError(httpResponse)
+        subject.send(completion: .failure(error))
+        return
+      }
+      
+      guard let url = tempURL else {
+        let error = TransferError.urlError(URLError(.fileDoesNotExist))
+        // not the most appropriate error message, but at a low-level that's exactly the error
+        subject.send(completion: .failure(error))
+        return
+      }
+      
+      do {
+        let data = try Data(contentsOf: url, options: [.dataReadingMapped, .uncached])
+        subject.send(task.com)
+        subject.send(completion: .finished)
+      } catch {
+        subject.send(completion: .failure(error))
+        return
+      }
+
+    }
+    
+    task.taskDescription = request.url?.absoluteString
+    
+    let fractionCompletePublisher = task.publisher(for: \.progress.fractionCompleted)
+      .debounce(for: .seconds(progressInterval), scheduler: RunLoop.current) // adjust
+    
+    let statePublisher = task.publisher(for: \.state, options: [.initial, .new])
+
+    Publishers.CombineLatest(fractionCompletePublisher, statePublisher)
+      .sink {
+        subject.send(transferringTaskOutput)
+    }.store(in: &CancellableStore.shared.cancellables)
+    
+    task.resume()
+    
+    return subject.eraseToAnyPublisher()
+    
+  }
+  
+  public func downloadTaskSimplePublisher(with request: URLRequest) -> AnyPublisher<DownloadOutput, Error> {
   
     let subject = PassthroughSubject<DownloadOutput, Error>()
    
@@ -81,6 +153,7 @@ public enum UploadOutput {
   case uploading(transferred: Int64 = 0, expected: Int64 = 0) // cumulative bytes transferred, total bytes expected
 }
 
+@available(OSX 10.15, *)
 extension URLSession {
   
   // MARK: Upload Task
