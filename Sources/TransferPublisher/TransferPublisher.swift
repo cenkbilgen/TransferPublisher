@@ -210,6 +210,25 @@ extension URLSession {
   
 }
 
+// MARK: Helpful Local Extensions
+
+private extension URLSessionTask {
+  var generatedDescription: String {
+    let method = originalRequest?.httpMethod
+    let endpoint = originalRequest?.url?.absoluteString
+    return "\(method ?? "") \(endpoint ?? "")"
+  }
+  var transferringTaskOutput: TaskOutput {
+    let transferState = TaskOutput.TransferState.transferring(progress)
+    return TaskOutput(taskId: taskIdentifier, taskDescription: taskDescription ?? generatedDescription, taskState: state, transferState: transferState)
+  }
+  
+  func completeTaskOutput(data: Data) -> TaskOutput {
+    let transferState = TaskOutput.TransferState.complete(data)
+    return TaskOutput(taskId: taskIdentifier, taskDescription: taskDescription ?? generatedDescription, taskState: state, transferState: transferState)
+  }
+}
+
 // MARK: Error Types
 
 public enum TransferError: Error {
