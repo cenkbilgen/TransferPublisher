@@ -1,9 +1,7 @@
 import Foundation
 import Combine
 
-// MARK: Download Publisher
-
-public struct TaskOutput {
+public struct TaskOutput: Identifiable, Hashable {
   let taskId: Int
   let taskDescription: String
   let taskState: URLSessionTask.State
@@ -12,11 +10,24 @@ public struct TaskOutput {
     case transferring(Progress)
   }
   let transferState: TransferState
+  
+  public var id: Int { taskId }
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(taskId)
+  }
+  public static func == (lhs: TaskOutput, rhs: TaskOutput) -> Bool {
+    lhs.taskId == rhs.taskId
+  }
 }
 
 public enum DownloadOutput {
   case complete(Data)
   case downloading(transferred: Int64 = 0, expected: Int64 = 0) // cumulative bytes transferred, total bytes expec@available(OSX 10.13, *)
+}
+
+fileprivate class TransferTaskStore {
+  static let shared = TransferTaskStore()
+  var store: Set<TaskOutput> = []
 }
 
 @available(OSX 10.15, *)
@@ -25,7 +36,7 @@ extension URLSession {
   public func downloadTaskPublisher(with request: URLRequest) -> AnyPublisher<TaskOutput, Error> {
   
     let subject = PassthroughSubject<TaskOutput, Error>()
-   
+    
     let task = downloadTask(with: request) { (tempURL, response, error) in
       
       guard error == nil else {
@@ -55,7 +66,7 @@ extension URLSession {
       
       do {
         let data = try Data(contentsOf: url, options: [.dataReadingMapped, .uncached])
-        subject.send(task.com)
+        subject.send(TransferTaskStore.shared.store)
         subject.send(completion: .finished)
       } catch {
         subject.send(completion: .failure(error))
@@ -64,16 +75,17 @@ extension URLSession {
 
     }
     
-    task.taskDescription = request.url?.absoluteString
+    let taskOutput = task.transferringTaskOutput
+    TransferTaskStore.shared.store.insert(task.transferringTaskOutput)
     
     let fractionCompletePublisher = task.publisher(for: \.progress.fractionCompleted)
-      .debounce(for: .seconds(progressInterval), scheduler: RunLoop.current) // adjust
+      .debounce(for: .seconds(0.1), scheduler: RunLoop.current) // adjust
     
     let statePublisher = task.publisher(for: \.state, options: [.initial, .new])
 
     Publishers.CombineLatest(fractionCompletePublisher, statePublisher)
       .sink {
-        subject.send(transferringTaskOutput)
+        subject.send()
     }.store(in: &CancellableStore.shared.cancellables)
     
     task.resume()
@@ -124,7 +136,7 @@ extension URLSession {
 
     }
     
-    task.taskDescription = request.url?.absoluteString
+    task.taskDescription = task.generatedDescription
     
     let receivedPublisher = task.publisher(for: \.countOfBytesReceived)
       .debounce(for: .seconds(0.1), scheduler: RunLoop.current) // adjust
