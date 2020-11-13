@@ -3,6 +3,8 @@
 
 XCode 11 lets you use the new Combine framework with URLSession by directly creating a URLSessionTask publisher, but not for an download or upload task (which perform better for transferring lots of data, plus background capability)
 
+> _I don't use this package myself anymore. It's just as easy to create KVO based Publisher's for the URLSessionDownload or Upload Task properties directly (or from their Progress property which is also KVO compliant)._ 
+
 Here are two extensions to `URLSession`:
 1. `func downloadTaskPublisher(with request: URLRequest) -> AnyPublisher<DownloadOutput, Error>`
 2. `func uploadTaskPublisher(with request: URLRequest, data: Data?) -> AnyPublisher<UploadOutput, Error>`
